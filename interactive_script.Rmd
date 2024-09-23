@@ -1,0 +1,156 @@
+---
+title: "Interactive Notebook"
+output: html_notebook
+---
+
+## Randomized control trial
+
+```{r}
+install.packages('readxl')
+install.packages('tidyverse')
+install.packages('censReg')
+install.packages('MatchIt')
+install.packages('sandwich')
+install.packages('lmtest')
+```
+
+```{r}
+library(readxl) # load excel files
+library(tidyverse) # manipulate data
+library(censReg) # censored regression model
+library(MatchIt) # propensity score matching
+library(sandwich) # heterokedasticity robust standard errors
+library(lmtest) # coefficient testing
+```
+
+Load and transform data:
+
+```{r}
+rawdata <- read_excel(path = 'data.xlsx')
+
+df <- rawdata %>% 
+  rename(ID = 'ID пациента',
+         D = 'T') %>% 
+  mutate(Yr = round(Y, 2)) %>% 
+  mutate(Xc = X - mean(X)) %>% 
+  mutate(Label = as_factor(D))
+```
+
+"ID" — identification number of patient
+
+"Y" — post-treatment outcome
+
+"D" — indicator of treatment (D=1) and control (D=0) group
+
+"X" — pre-treatment number of steps for a long period of time (in thousands per day)
+
+```{r}
+head(df)
+```
+
+### Exploratory data analysis
+
+Observed outcome across the patients:
+
+```{r}
+df %>% 
+  ggplot(mapping = aes(x = ID, y = Y, color = Label)) +
+  geom_point() +
+  theme_bw() +
+  theme(legend.position = 'top') +
+  labs(x = 'Patient', y = 'Observed health outcome') +
+  scale_color_discrete(name = '', labels = c('Placebo', 'Treatment'))
+```
+
+Distribution of observed outcome (looks like Y has a censored distribution):
+
+```{r}
+df %>% 
+  ggplot(mapping = aes(x = Y, fill = Label)) +
+    geom_histogram(bins = 250) +
+    theme_bw() +
+    theme(legend.position = 'top') + 
+    labs(x = 'Observed health outcome', y = 'No of evidence') +
+    scale_fill_discrete(name = '', labels = c('Placebo', 'Treatment'))
+```
+
+Descriptive statistics table:
+
+```{r}
+descriptive_stats <- df %>% 
+  select(-ID) %>% 
+  group_by(D) %>% 
+  summarise(n = n(),
+            distinct_y = n_distinct(Y),
+            mean_y = mean(Y), sd_y = sd(Y),
+            min_y = min(Y), max_y = max(Y),
+            median_y = median(Y),
+            distinct_x = n_distinct(X),
+            mean_x = mean(X), sd_x = sd(X),
+            min_x = min(X), max_x = max(X),
+            median_x = median(X))
+```
+
+```{r}
+descriptive_stats %>% 
+  select(D, n, mean_y, sd_y, min_y, max_y, median_y)
+```
+
+> D=1 for treatment group and D=0 is for control group
+>
+> "n" — number of observation in each group
+>
+> "mean\_" — average value across groups
+>
+> "sd\_" — standard deviation
+>
+> "min\_" and "max\_" — minimum and maximum, respectively
+>
+> "median\_" — 50% quantile of distribution
+
+Below we can see that pre-treatment patients' characteristics has a similar distribution across treatment and control group:
+
+```{r}
+descriptive_stats %>% 
+  select(D, n, mean_x, sd_x, min_x, max_x, median_x)
+```
+
+Same pattern we can see just plotting the distribution:
+
+```{r}
+df %>% 
+  ggplot(mapping = aes(x = X, fill = Label)) +
+  geom_histogram(aes(y = after_stat(density)), position = 'identity', alpha = 0.33, bins = 50) +
+  theme_bw() +
+  theme(legend.position = 'top') + 
+  labs(x = 'Pre-treatment K steps per day', y = 'Density') +
+  scale_fill_discrete(name = '', labels = c('Placebo', 'Treatment'))
+```
+
+More strictly, we can estimate the regression of treatment variable D on patients' characteristics X to see that D is exogenous with respect to X. Hence, it really was a randomized trial and there's no selection bias:
+
+```{r}
+lm(data = df, formula = D ~ X) %>% 
+  coeftest(vcov = vcovHC(., type = 'HC1')) # use heteroskedasticity-consistent standard errors (Eicker-Huber-White) for robust statistical inference
+```
+
+Finally, let's look at the association between outcome Y and pre-treatment patients' characteristics X. Here we can notice a complex non-linear relationship which is completely free of any noise. This needs pretty sophisticated methods of controlling Y for X, which we need to tackle with to make a precise estimation of average treatment effect:
+
+```{r}
+df %>% 
+  ggplot(mapping = aes(x = X, y = Y, color = Label)) +
+  geom_point() +
+  stat_smooth(method = 'lm', formula = y ~ x, geom = 'smooth') +
+  theme_bw() +
+  theme(legend.position = 'top') + 
+  labs(x = 'Pre-treatment K steps per day', y = 'Observed health outcome') +
+  scale_color_discrete(name = '', labels = c('Placebo', 'Treatment'))
+```
+
+### Estimation of Population Average Treatment Effect (PATE)
+
+#### Diff-in-means
+
+Firstly, look at "free of model" estimator of ATE, which we can extract from the information
+
+Broadly spreaking, the absence of dependence between D and X guarantees that
