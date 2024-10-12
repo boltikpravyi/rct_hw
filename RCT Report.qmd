@@ -1,0 +1,518 @@
+---
+title: 'Food for Thought: Evidence from a Randomized Controlled Trial'
+bibliography: references.bib
+author: ''
+date: today
+date-format: long
+format: pdf
+number-sections: true
+reference-location: section
+toc: true
+citeproc: true
+colorlinks: true
+editor: visual
+editor_options: 
+  chunk_output_type: inline
+echo: false # disables the printing of code (only output is displayed)
+warning: false
+message: false
+geometry:
+  - top=15mm
+  - left=15mm
+  - right=15mm
+  - bottom=15mm
+  - heightrounded
+fontfamily: libertinus
+fontsize: 14pt
+abstract: 'In this note, we examine the results of a randomized placebo-controlled trial conducted on a sample of 2,500 patients, aimed at assessing the impact of a food additive on health outcomes. We perform causal discovery and causal inference using several frequentist estimators under different assumptions. Our analysis indicates that the point estimate of the population average treatment effect (PATE) is 6.333, with a standard error of 0.009. If the analyzed sample is representative of the entire population and we consider 6.333 to be an unbiased estimate, we can treat this value as the estimand of the PATE. In this case, the PATE has no variance, and its standard error becomes zero.'
+---
+
+```{r}
+# load data
+rawdata <- read_excel(path = 'data.xlsx')
+# Transform data
+df <- rawdata %>% 
+  rename(ID = 'ID пациента',
+         D = 'T') %>% 
+  mutate(Yr = round(Y, 2)) %>%
+  mutate(Label = as_factor(D)) %>%
+  mutate(X2 = X^2, X3 = X^3, X4 = X^4, X5 = X^5, X6 = X^6) %>% 
+  mutate(Xc = X - mean(X), X2c = X2 - mean(X2), X3c = X3 - mean(X3), 
+         X4c = X4 - mean(X4), X5c = X5 - mean(X5), X6c = X6 - mean(X6))
+# Matching treatment and control
+estMatch <- matchit(D ~ Xc, data = df, method = 'nearest')
+dfMatch <- (df %>% 
+              dplyr::filter(ID %in% as.numeric(estMatch$match.matrix[,1]))) %>%
+  bind_rows(df %>% dplyr::filter(D == 1)) %>% 
+  mutate(X2 = X^2, X3 = X^3, X4 = X^4, X5 = X^5, X6 = X^6) %>% 
+  mutate(Xc = X - mean(X), X2c = X2 - mean(X2), X3c = X3 - mean(X3), 
+         X4c = X4 - mean(X4), X5c = X5 - mean(X5), X6c = X6 - mean(X6))
+```
+
+# Description of the Experiment and the Data {#sec-part1}
+
+The experiment[^1] was conducted on a sample of $n = 2 500$ patients, who were randomly selected from a population of unknown size, $N$. Of these patients, $n_1 = 507$ were assigned to receive a food additive ($D = 1$), while the remaining $n_0 = 1993$ received a placebo, placing them in the control group ($D = 1$). The outcome variable is a post-treatment health measure ($Y$), and another key variable is the pre-treatment number of steps recorded for each patient ($X$).
+
+[^1]: The replication code is available on [GitHub](https://github.com/boltikpravyi/rct_hw) and [Google Colab](https://colab.research.google.com/drive/11MhfDH2x8BTuh3yGTZKWlJhVAeRTydMX?usp=sharing). Additional materials (figures and tables) can be found in the Appendix A of this note.
+
+The results of the exploratory data analysis are summarized as follows:
+
+1.  **Censoring in Post-Treatment Health Outcome (Y)**
+
+    The post-treatment health outcome ($Y$) is subject to both left and right censoring (@fig-dist-y). This feature must be considered during the causal inference stage. In the presence of censoring, estimates of the average treatment effect ($\mbox{ATE}$) based on standard estimators like OLS may be biased toward zero, as their statistical properties depend on the assumption of symmetric noise distribution. To control for the magnitude of this bias, we compare $\mbox{ATE}$ estimates from censored regressions (CR) to those obtained via OLS.
+
+2.  **Bias Due to Heteroscedasticity**
+
+    Even after accounting for censoring, CR parameter estimates may still be biased if heteroscedasticity in the noise is ignored during estimation. In our RCT data, one potential source of heteroscedasticity is the inequality in the standard deviations of the outcome between the treatment and control groups (@tbl-desc-y). According to the simulation experiments by @BrownMoffit1983, this could introduce a negative bias in $\mbox{ATE}$ estimates if the assumption of homoscedasticity is incorrectly applied.
+
+3.  **Randomization Check**
+
+    The distribution of the pre-treatment number of steps ($X$) suggests that the treatment assignment ($D$) is not determined by patient characteristics. We further verify this by comparing the sample means between the treatment and control groups (@tbl-desc-x) and running a linear regression of $D$ on $X$ (@tbl-ols-dx). This confirms that the RCT protocol was correctly followed, and patients were randomly assigned to the treatment group. Therefore, omitting $X$ during the estimation of ATE should not lead to omitted variable bias. To ensure robustness, we perform alternative estimates of $\mbox{ATE}$ using exact matching[^2], where only those observations with identical values of $X$ in both groups are retained.
+
+4.  **Interaction Between Pre- and Post-Treatment Variables**
+
+    An examination of the relationship between the post-treatment outcome ($Y$) and the pre-treatment covariate ($X$) reveals that the treatment tends to alter the slope of the dependence between the two variables (@fig-scat-xy). Specifically, a negative association before treatment becomes a positive correlation after treatment. This suggests that the treatment’s impact on the health outcome depends on the patient's initial characteristics. As a result, we control for both $X$ and an interaction term ($X*D$), because including these terms always improves the precision of $\mbox{ATE}$ estimates [@Lin2013].
+
+5.  **Non-linearity in the Relationship Between X and Y**
+
+    The relationship between $X$ and $Y$ appears deterministic, indicating that a model-free $\mbox{ATE}$ estimator (e.g., "difference-in-means") would yield similar results to more sophisticated estimators, such as "Double Machine Learning", which can model the relationship between $X$ and $Y$ using advanced prediction methods like random forests or neural networks. While partial[^3] disregard for this nonlinearity may not introduce bias in $\mbox{ATE}$ estimates (since $D$ is independent of $X$), it could reduce the estimator’s efficiency. When choosing between unbiasedness and efficiency, we prioritize unbiasedness[^4]. Ignoring nonlinearity might also introduce heteroscedasticity in the error term, so we apply Eicker-Huber-White robust standard errors wherever possible to ensure valid statistical inference.
+
+6.  **Causal Discovery Using the Peter-Clark Algorithm**
+
+    To uncover causal relationships between variables, we apply the Peter-Clark algorithm, which assumes no unobserved latent confounders in the observational data. By constructing a directed acyclic graph using this method (@fig-dag), we find that $Y$ is independently influenced by both $D$ and $X$, but not the other way around. This is crucial for identifying the $\mbox{ATE}$, as reverse causality would be a major roadblock for the study that required an instrumental variable to estimate the causal impact of an independent variable on the outcome.
+
+[^2]: Of course, this results in dropping observations that cannot be matched with treated units. In our case, if strict matching is applied, the sample size will decrease from $n$ to $2n_1$, which in turn reduces the precision of the ATE estimates compared to the scenario without matching.
+
+[^3]: In our regressions, we include polynomials up to the fourth order.
+
+[^4]: A first-best solution would involve combining Double ML with censored regression estimation, and accounting for conditional heteroscedasticity of the noise during the estimation procedure. However, we rely on suboptimal approaches in this analysis and leave the optimal method for future work.
+
+# Estimation of the Population Average Treatment Effect and Its Precision {#sec-part2}
+
+We estimate the causal effect of the food additive using the average treatment effect ($\mbox{ATE}$):
+
+$$
+\mbox{ATE} =  \mathbb{E}[Y_1 - Y_0],
+$$
+
+where $Y_1$ represents the patients' outcome under treatment, and $Y_0$ is the outcome under control. Due to the fundamental problem of causal inference, we can observe only one of these outcomes for each individual, which means we cannot calculate the individual treatment effect for a patient ($\mbox{TE} = Y_1 - Y_0$). Alternatively, we can estimate the association between treated and untreated patients, known as the average predictive effect ($\mbox{APE}$):
+
+$$
+\mbox{APE} = \mathbb{E}[Y_1|D=1] - \mathbb{E}[Y_0|D=0],
+$$
+
+and interpret it as an $\mbox{ATE}$ estimate because, as we have seen earlier, treated and untreated patients differ only in terms of the treatment itself and not in their initial characteristics ($X$). This implies that there is no selection bias ($\mathbb{E}[Y_0|D = 1] = \mathbb{E}[Y_0|D = 0]$), which could potentially contaminate the $\mbox{APE}$, making it differ from the $\mbox{ATE}$.
+
+Our empirical strategy for obtaining an estimate of the population average treatment effect ($\mbox{PATE}$) is as follows. First, we leverage the fact that the distribution of $Y$ is susceptible to censoring. As a result, using sample averages for a difference-in-means estimator (and, equivalently, an OLS estimator) will lead to downward bias, as these methods assume a symmetric i.i.d. distribution of outcomes. Second, we assume that censoring arises from exogenous factors unrelated to the patient's treatment status (i.e., no sample selection). To take both of these circumstances into account, we employ an old-fashioned (Type I) censored regression model originally proposed by @Tobin1958.
+
+In this model, the post-treatment health outcome $Y_{n \times 1}$ is subject to bottom ($a$) and top ($b$) censoring
+
+$$
+Y = 
+\begin{cases}
+a \hspace{1.5em} y^* \leq a \\
+y^* \quad a < y^* < b \\
+b \hspace{1.5em} y^* \geq b \\
+\end{cases}
+$$
+
+while a latent variable $y^*$ is influenced by the treatment dummy $D$ and centered covariates $W$ (such as $\mbox{E}(W)=0$)
+
+$$
+\begin{aligned}
+&y^* = \vec{1}\alpha + D\beta + W\gamma + \varepsilon \\
+&\mbox{E}(y^*|a<y^*<b|D,W) = \vec{1}\alpha + D\beta + W\gamma,
+\end{aligned}
+$$ {#eq-reg}
+
+where $W=(X,XD,X^2,X^2D,X^3,X^3D)_{n \times 2}$ and $\varepsilon \to \mbox{i.i.d.} \space \mathcal{N}(0,\sigma^2 I_{n \times n})$ in large samples due to the Central Limit Theorem (CLT). To obtain sample estimates of the parameters, we employ a Maximum Likelihood estimator, which provides a consistent estimate of $\beta$ according to @Amemiya1973.
+
+To mitigate a potential downward bias in $\mbox{ATE}$ estimates due to heteroscedasticity [@BrownMoffit1983], we estimate an alternative variant of the model, relaxing the homoscedasticity assumption and allowing the standard deviation of the noise to depend on observable regressors:
+
+$$
+\mbox{log}(\sigma_i)=z_i'\delta+\epsilon_i,
+$$ {#eq-het}
+
+where $z'_i=(1,d_i,x_i,x_i^2,x_i^3,x_i^4)$ and $\epsilon_i$ is an i.i.d. innovation with zero mean and unit variance.
+
+In addition to censored regressions, we also perform a simple linear regression based on the specification given in @eq-reg. This helps us measure the degree of downward bias that occurs when using the OLS estimator.
+
+As discussed earlier, the population[^5] average treatment effect estimate (PATE) in the models is derived as follows:
+
+[^5]: We assume that, due to the RCT protocol, the estimate of the sample average treatment effect ($\widehat{\mbox{SATE}}$) is an unbiased estimator of the true $\mbox{SATE}$. Additionally, we consider $\mbox{SATE}$ to be an unbiased estimator of the population average treatment effect $\mbox{PATE}$, provided the sample is representative of the population.
+
+$$
+\widehat{\mbox{PATE}} = \widehat{\mbox{SATE}} =
+\widehat{\mathbb{E}[Y|D=1]} - \widehat{\mathbb{E}[Y|D=0]} 
+$$
+
+For a linear regression, this difference in conditional expectations corresponds to $\hat{\beta}$, while in censored regression, the effect[^6] depends on the distribution function:
+
+[^6]: The complete derivation of this estimate is provided in Appendix B of this note.
+
+$$
+\begin{aligned}
+\widehat{\mathbb{E}[Y|D=1]} - \widehat{\mathbb{E}[Y|D=0]} = \
+& \hat{\beta} \left[ \Phi \left( \frac{b-\vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - 
+\Phi \left( \frac{a-\vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \right] \\
+& + \left(\vec{1}\hat{\alpha}+W\hat{\gamma}-a+\hat{\beta}\right) 
+\Phi \left(\frac{a-\vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}}\frac{\hat{\beta}}{\hat{\sigma}}\right) \\
+& - \left(\vec{1}\hat{\alpha}+W\hat{\gamma}-b+\hat{\beta}\right)
+\Phi \left( \frac{b-\vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}}\frac{\hat{\beta}}{\hat{\sigma}} \right)
+\end{aligned}
+$$ {#eq-ate}
+
+For the precision of these estimates, we calculate the standard error of $\widehat{\mbox{PATE}}$. In censored regressions, we use the Delta method, while for OLS estimates, we apply Eicker-Huber-White robust standard errors. To capture the full picture of the estimates' uncertainty, we construct 99% confidence intervals using the estimated standard errors.
+
+```{r}
+# OLS estimators (no matching)
+estOLS <- lm(Y ~ D, data = df)
+mefOLS <- avg_slopes(estOLS, variables = 'D', vcov = 'HC3')
+estOLSControl <- lm(Y ~ D + Xc*D + X2c*D + X3c*D, data = df)
+mefOLSControl <- avg_slopes(estOLSControl, variables = 'D', vcov = 'HC3')
+# OLS estimator (exact matching)
+estOLSMatch <- lm(Y ~ D, data = dfMatch)
+mefOLSMatch <- avg_slopes(estOLSMatch, variables = 'D', vcov = 'HC3')
+estOLSMatchControl <- lm(Y ~ D + Xc*D + X2c*D + X3c*D, data = dfMatch)
+mefOLSMatchControl <- avg_slopes(estOLSMatchControl, variables = 'D', vcov = 'HC3')
+# Censored ML estimators (no matching)
+estCens <- tobit(Yr ~ D, data = df, left = min(df$Yr), right = max(df$Yr), robust = T)
+mefCens <- avg_slopes(estCens, variables = 'D')
+estCensControl <- tobit(Yr ~ D + Xc*D + X2c*D + X3c*D, data = df, left = min(df$Yr), right = max(df$Yr), robust = T)
+mefCensControl <- avg_slopes(estCensControl, variables = 'D')
+# Censored ML estimators (exact matching)
+estCensMatch <- tobit(Yr ~ D, data = dfMatch, left = min(dfMatch$Yr), right = max(dfMatch$Yr), robust = T)
+mefCensMatch <- avg_slopes(estCensMatch, variables = 'D')
+estCensMatchControl <- tobit(Yr ~ D + Xc*D + X2c*D + X3c*D, data = dfMatch, left = min(dfMatch$Yr), right = max(dfMatch$Yr), robust = T)
+mefCensMatchControl <- avg_slopes(estCensMatchControl, variables = 'D')
+# Censored ML Estimators w/ heteroscedastic errors
+estCensHC <- crch(Yr ~ D | D + Xc + X2c + X3c + X4c, data = df, left = min(df$Yr), right = max(df$Yr))
+mefCensHC <- avg_slopes(estCensHC, variables = 'D')
+estCensHCMatch <- crch(Yr ~ D | D + Xc + X2c + X3c + X4c, data = dfMatch, left = min(dfMatch$Yr), right = max(dfMatch$Yr))
+mefCensHCMatch <- avg_slopes(estCensHCMatch, variables = 'D')
+```
+
+Now, let's review the point estimates of the $\mbox{PATE}$ (@tbl-pate).
+
+The results are presented in two panels. Panel A utilizes the entire sample of 2,500 patients, while Panel B ("Exact Matching") uses a subsample where each treated patient is matched with a "twin" based on their pre-treatment characteristics.
+
+The first two columns show estimates obtained from linear regression models: one that includes pre-treatment covariates ("OLS w/ X") and one that does not ("OLS"). In columns 3 and 4, we see results from censored regressions ("CR" and "CR w/ X"), which employ a maximum likelihood (ML) estimator of the $\widehat{\mbox{PATE}}$ under the assumption of homoscedasticity. The final column provides estimates from a censored regression that controls for conditional heteroscedasticity, using the model specified in @eq-het ("CR w/ het. err.").
+
+The main findings can be summarized as follows:
+
+1.  As expected, OLS estimates of $\mbox{PATE}$ are lower than those from censored regressions. The downward bias is more pronounced when controls are excluded from the model (5.936/5.941 in the pairwise linear regression vs. 5.997/5.998 in the censored regression).
+2.  Surprisingly, adding controls to the models slightly reduces the $\mbox{PATE}$ estimates. This effect is more noticeable in censored regressions (5.997/5.998 vs. 5.947/5.950), possibly due to accounting for the non-linearity in the conditional average treatment effect.
+3.  Including interaction terms improves the precision of the estimates, consistent with theoretical predictions. This effect, seen in both linear and censored regression models, leads to a decrease in standard errors.
+4.  The most substantial bias occurs when conditional heteroscedasticity is ignored in censored regression models. Relaxing this assumption leads to a sharp increase in the $\mbox{PATE}$ point estimate, from 5.997/5.947 to 6.333 (and from 5.998/5.950 to 6.315 with Exact Matching).
+
+Based on these results, we conclude that the causal effect of the food additive on health outcomes is 6.333, with a standard error of 0.009. If we assume that (1) the RCT protocol is correct, and (2) our sample is representative of the population, then this estimate serves as an unbiased estimate of the population average treatment effect ($\mbox{PATE}$). We can infer that, on average, administering the food additive to the entire population would increase the health indicator by 6.333. The 99% confidence interval for the causal effect ranges from 6.316 to 6.351.
+
+```{r}
+#| label: tbl-pate
+#| tbl-cap: 'Estimates of the Population Average Treatment Effect'
+options('modelsummary_format_numeric_latex' = 'plain')
+mefs <- list(
+  'Panel A: No Matching' = list(
+    'OLS' = mefOLS,
+    'OLS w/ X' = mefOLSControl,
+    'CR' = mefCens,
+    'CR w/ X' = mefCensControl,
+    'CR w/ het. err.' = mefCensHC),
+  'Panel B: Exact Matching' = list(
+    'OLS' = mefOLSMatch,
+    'OLS w/ X' = mefOLSMatchControl,
+    'CR' = mefCensMatch,
+    'CR w/ X' = mefCensMatchControl,
+    'CR w/ het. err.' = mefCensHCMatch))
+modelsummary(mefs, shape = 'rbind', stars = T, statistic = c('s.e. = {std.error}', 'conf.int'), coef_rename = c('D' = 'PATE'), conf_level = .99, gof_omit = c('IC|Log|R2|F|Std|r2'))
+```
+
+# Treating the Sample as a Population {#sec-part3}
+
+If we assume that the collected sample represents the entire population, this simplifies the task of estimating the $\mbox{PATE}$, as there is no need to make assumptions about the sample's representativeness. In this case, any unbiased estimator will directly provide the estimand of the $\mbox{PATE}$.
+
+As shown in @tbl-pate, the most refined estimate of the $\mbox{PATE}$ is 6.333. If we accept this as an unbiased estimate of the $\mbox{PATE}$, we conclude that the estimand of the $\mbox{PATE}$ is 6.333. Additionally, since this "true" $\mbox{PATE}$ represents the entire population, it has no variance, meaning the precision (i.e., the standard error) of this value would be zero.
+
+# Conclusion {#sec-concl}
+
+In this note, we examine the results of a randomized placebo-controlled trial conducted on a sample of 2,500 patients, aimed at assessing the impact of a food additive on health outcomes. We perform causal discovery and causal inference using several frequentist estimators under different assumptions.
+
+Our analysis indicates that the point estimate of the population average treatment effect ($\mbox{PATE}$) is 6.333, with a standard error of 0.009.
+
+If the analyzed sample is representative of the entire population and we consider 6.333 to be an unbiased estimate, we can treat this value as the estimand of the $\mbox{PATE}$. In this case, the $\mbox{PATE}$ has no variance, and its standard error becomes zero.
+
+# Appendix A {#sec-appendix-a .unnumbered}
+
+```{r}
+#| label: fig-dist-y
+#| fig-cap: 'Distribution of Post-Treatment Health Outcome (Y)'
+#| fig-subcap: 
+#|   - 'No Matching'
+#|   - 'Exact Matching'
+#| layout-ncol: 2
+# Distribution of observed outcomes
+df %>% 
+  ggplot(mapping = aes(x = Y, fill = Label)) +
+    geom_histogram(bins = 250) +
+    theme_bw() +
+    theme(legend.position = 'top') + 
+    labs(x = 'Post-Treatment Health Outcome (Y)', y = 'No. of evidence') +
+    scale_fill_discrete(name = '', labels = c('Control (D=0)', 'Treatment (D=1)'))
+dfMatch %>% 
+  ggplot(mapping = aes(x = Y, fill = Label)) +
+  geom_histogram(bins = 250) +
+  theme_bw() +
+  theme(legend.position = 'top') + 
+  labs(x = 'Post-Treatment Health Outcome (Y)', y = 'No. of evidence') +
+  scale_fill_discrete(name = '', labels = c('Control (D=0)', 'Treatment (D=1)'))
+```
+
+```{r}
+#| label: fig-dist-x
+#| fig-cap: 'Distribution of Pre-Treatment Thousands of Steps Per Day (X)'
+#| fig-subcap: 
+#|   - 'No Matching'
+#|   - 'Exact Matching'
+#| layout-ncol: 2
+# Pre-treatment patients' characteristics
+df %>% 
+  ggplot(mapping = aes(x = X, fill = Label)) +
+  geom_histogram(aes(y = ..density..), position = 'identity', alpha = 0.33, bins = 50) +
+  theme_bw() +
+  theme(legend.position = 'top') + 
+  labs(x = 'Pre-Treatment Thousands of Steps Per Day (X)', y = 'Density') +
+  scale_fill_discrete(name = '', labels = c('Control (D=0)', 'Treatment (D=1)'))
+dfMatch %>% 
+  ggplot(mapping = aes(x = X, fill = Label)) +
+  geom_histogram(aes(y = ..density..), position = 'identity', alpha = 0.33, bins = 50) +
+  theme_bw() +
+  theme(legend.position = 'top') + 
+  labs(x = 'Pre-Treatment Thousands of Steps Per Day (X)', y = 'Density') +
+  scale_fill_discrete(name = '', labels = c('Control (D=0)', 'Treatment (D=1)'))
+```
+
+```{r}
+#| label: tbl-desc-y
+#| tbl-cap: 'Descriptive Statistics of Post-Treatment Health Outcome (Y)'
+#| layout-ncol: 2
+# Descriptive statistics
+desc <- df %>% 
+  select(-ID) %>% 
+  group_by(D) %>% 
+  summarise(n = n(), mean_y = mean(Y), sd_y = sd(Y), mean_x = mean(X), sd_x = sd(X))
+desc %>% 
+  select(D, n, mean_y, sd_y) %>% 
+  kable(format = 'latex', digits = 2, col.names = c('D', 'n', 'Mean', 'Std'), caption = 'No Matching')
+descMatch <- dfMatch %>% 
+  select(-ID) %>% 
+  group_by(D) %>% 
+  summarise(n = n(), mean_y = mean(Y), sd_y = sd(Y), mean_x = mean(X), sd_x = sd(X))
+descMatch %>% 
+  select(D, n, mean_y, sd_y) %>% 
+  kable(format = 'latex', digits = 2, col.names = c('D', 'n', 'Mean', 'Std'), caption = 'Exact Matching')
+```
+
+```{r}
+#| label: tbl-desc-x
+#| tbl-cap: 'Descriptive Statistics of Pre-Treatment Thousands of Steps Per Day (X)'
+#| layout-ncol: 2
+# Descriptive statistics
+desc <- df %>% 
+  select(-ID) %>% 
+  group_by(D) %>% 
+  summarise(n = n(), mean_y = mean(Y), sd_y = sd(Y), mean_x = mean(X), sd_x = sd(X))
+desc %>% 
+  select(D, n, mean_x, sd_x) %>% 
+  kable(format = 'latex', digits = 2, col.names = c('D', 'n', 'Mean', 'Std'), caption = 'No Matching')
+descMatch <- dfMatch %>% 
+  select(-ID) %>% 
+  group_by(D) %>% 
+  summarise(n = n(), mean_y = mean(Y), sd_y = sd(Y), mean_x = mean(X), sd_x = sd(X))
+descMatch %>% 
+  select(D, n, mean_x, sd_x) %>% 
+  kable(format = 'latex', digits = 2, col.names = c('D', 'n', 'Mean', 'Std'), caption = 'Exact Matching')
+```
+
+```{r}
+#| label: tbl-ols-dx
+#| tbl-cap: 'Results from a Pairwise Linear Regression of Treatment Status (D) on Pre-Treatment Patients'' Characteristics (X)'
+options('modelsummary_format_numeric_latex' = 'plain')
+models <- list('Panel A: No Matching' = list('OLS' = lm(D ~ X, data = df)),
+               'Panel B: Exact Matching' = list('OLS' = lm(D ~ X, data = dfMatch)))
+modelsummary(models, shape = 'cbind', vcov = 'HC3', coef_rename = c('X' = 'No. of steps (X)'), statistic = c('conf.int', 's.e. = {std.error}', 't = {statistic}', 'p = {p.value}'), conf_level = .99, gof_omit = c('IC|RMSE|Log|R2$'), output = 'latex')
+```
+
+```{r}
+#| label: fig-scat-xy
+#| fig-cap: 'Scatter Plot of Pre-Treatment Thousands of Steps Per Day (X) and Post-Treatment Health Outcome (Y)'
+#| fig-subcap: 
+#|   - 'No Matching'
+#|   - 'Exact Matching'
+#| layout-ncol: 2
+# How observed outcome is related to pre-treatment patients' characteristics
+df %>% 
+  ggplot(mapping = aes(x = X, y = Y, color = Label)) +
+  geom_point() +
+  stat_smooth(method = 'lm', formula = y ~ x, geom = 'smooth') +
+  theme_bw() +
+  theme(legend.position = 'top') + 
+  labs(x = 'Pre-Treatment Thousands of Steps Per Day (X)', y = 'Post-Treatment Health Outcome (Y)') +
+  scale_color_discrete(name = '', labels = c('Control (D=0)', 'Treatment (D=1)'))
+dfMatch %>% 
+  ggplot(mapping = aes(x = X, y = Y, color = Label)) +
+  geom_point() +
+  stat_smooth(method = 'lm', formula = y ~ x, geom = 'smooth') +
+  theme_bw() +
+  theme(legend.position = 'top') + 
+  labs(x = 'Pre-Treatment Thousands of Steps Per Day (X)', y = 'Post-Treatment Health Outcome (Y)') +
+  scale_color_discrete(name = '', labels = c('Control (D=0)', 'Treatment (D=1)'))
+```
+
+```{r}
+#| label: fig-dag
+#| fig-cap: 'Directed Acyclic Graph Based on Peter-Clark Algorithm'
+# Make causal discovery procedure to understand connections between variables
+suff_stat <- list(C = cor(df[,2:4]), n = nrow(df[,2:4]))
+estPC <- pc(suff_stat, indepTest = gaussCItest, labels = colnames(df[,2:4]), alpha = 0.01, skel.method = 'stable.fast')
+plot(estPC, main = '')
+```
+
+# Appendix B {#sec-appendix-b .unnumbered}
+
+Firstly, we derive a conditional expectation for the outcome $Y$:
+
+$$
+\begin{aligned}
+\mathbb{E}[Y|D,W] = \ & a\mbox{P}(y^*\leq a|D,W) \\
+& + P(a<y^*<b|D,W)\mbox{E}(y^*|a<y^*<b|D,W) \\
+& + b\mbox{P}(y^*\geq b|D,W)
+\end{aligned}
+$$
+
+According to @eq-reg,
+
+$$
+\begin{aligned}
+\mathbb{E}[Y|D,W] = \ & a\mbox{P}(\varepsilon \leq a - \vec{1}\alpha - D\beta - W\gamma) \\ 
+& + P(a < \vec{1}\alpha+D\beta+W\gamma+\varepsilon < b | D,W) \mbox{E}(y^*|a<y^*<b|D,W) \\
+& + b\mbox{P}(\varepsilon \geq b - \vec{1}\alpha - D\beta - W\gamma |D,W)
+\end{aligned}
+$$
+
+and because of $\varepsilon \sim \mathcal{N}(0,\sigma^2I_{n \times n})$,
+
+$$
+\begin{aligned}
+\mathbb{E}[Y|D,W] = \
+& a \Phi \left( \frac{a - \vec{1}\alpha+D\beta+W\gamma}{\sigma} \right) \\
+& + \mbox{E}(y^*|a<y^*<b|D,W) \left[ \Phi \left( \frac{b - \vec{1}\alpha+D\beta+W\gamma}{\sigma} \right) - \Phi \left( \frac{a - \vec{1}\alpha+D\beta+W\gamma}{\sigma} \right) \right] \\
+& + b \left[ 1 - \Phi \left( \frac{b - \vec{1}\alpha+D\beta+W\gamma}{\sigma} \right) \right]
+\end{aligned}
+$$
+
+We can rewrite the last equation like this:
+
+$$
+\begin{aligned}
+\mathbb{E}[Y|D,W] = \
+& \Phi \left( \frac{b - \vec{1}\alpha-D\beta-W\gamma}{\sigma} \right) \left[ \mbox{E}(y^*|a<y^*<b|D,W) - b \right] \\
+& - \Phi \left( \frac{a - \vec{1}\alpha-D\beta-W\gamma}{\sigma} \right) \left[ \mbox{E}(y^*|a<y^*<b|D,W) - a \right] \\
+& + b
+\end{aligned}
+$$
+
+Secondly, we calculate the expectation outcome $Y$ for the treated (using @eq-reg)
+
+$$
+\begin{aligned}
+\widehat{\mathbb{E}[Y|D=1]} = \
+& \Phi \left( \frac{b - \vec{1}\hat{\alpha}-\hat{\beta}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+\hat{\beta}+W\hat{\gamma}-b \right) \\
+& - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-\hat{\beta}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+\hat{\beta}+W\hat{\gamma}-a \right) \\
+& + b
+\end{aligned}
+$$ {#eq-treated}
+
+and for the untreated
+
+$$
+\begin{aligned}
+\widehat{\mathbb{E}[Y|D=0]} = \
+& \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-b \right) \\
+& - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-a \right) \\
+& + b
+\end{aligned}
+$$
+
+Thirdly, we re-express the @eq-treated:
+
+$$
+\begin{aligned}
+\widehat{\mathbb{E}[Y|D=1]} = \
+& \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} -\frac{\hat{\beta}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-b \right) \\
+& + \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} -\frac{\hat{\beta}}{\hat{\sigma}} \right) \hat{\beta} \\
+& - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} -\frac{\hat{\beta}}{\hat{\sigma}}\right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-a \right) \\
+& - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} -\frac{\hat{\beta}}{\hat{\sigma}} \right) \hat{\beta} \\
+& + b \\
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+\widehat{\mathbb{E}[Y|D=1]} = & \ \left[ \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \right] \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-b \right) \\
+& + \left[ \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \right] \hat{\beta} \\
+& - \left[ \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \right] \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-a \right) \\
+& - \left[ \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \right] \hat{\beta} \\
+& + b \\
+\end{aligned}
+$$ $$
+\begin{aligned}
+\widehat{\mathbb{E}[Y|D=1]} = & \ \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-b \right) - \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-b \right) \\
+& + \left[ \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \right] \hat{\beta} \\
+& - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-a \right) + \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-a \right) \\
+& - \left[ \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \right] \hat{\beta} \\
+& + b \\
+\end{aligned}
+$$
+
+Then, we express $\widehat{\mbox{PATE}}$ as the difference between $\widehat{\mathbb{E}[Y|D=1]}$ and $\widehat{\mathbb{E}[Y|D=0]}$:
+
+$$
+\begin{aligned}
+\widehat{\mathbb{E}[Y|D=1]} = & \ \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-b \right) - \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-b \right) \\
+& + \left[ \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \right] \hat{\beta} \\
+& - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-a \right) + \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-a \right)  \\
+& - \left[ \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \right] \hat{\beta} \\
+& + b \\
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+\widehat{\mathbb{E}[Y|D=0]} = \
+& \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-b \right) \\
+& - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-a \right) \\
+& + b \\
+\end{aligned}
+$$ $$
+\begin{aligned}
+\widehat{\mbox{PATE}} = \
+& - \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-b \right) \\
+& + \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \hat{\beta} - \Phi \left( \frac{b - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \hat{\beta} \\
+& + \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \left( \vec{1}\hat{\alpha}+W\hat{\gamma}-a \right)  \\
+& - \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \hat{\beta} + \Phi \left( \frac{a - \vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \frac{\hat{\beta}}{\hat{\sigma}} \right) \hat{\beta}
+\end{aligned}
+$$
+
+And finally, we get the formula:
+
+$$
+\begin{aligned}
+\widehat{\mbox{PATE}} = \
+& \hat{\beta} \left[ \Phi \left( \frac{b-\vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) - 
+\Phi \left( \frac{a-\vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}} \right) \right] \\
+& + \left(\vec{1}\hat{\alpha}+W\hat{\gamma}-a+\hat{\beta}\right) 
+\Phi \left(\frac{a-\vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}}\frac{\hat{\beta}}{\hat{\sigma}}\right) \\
+& - \left(\vec{1}\hat{\alpha}+W\hat{\gamma}-b+\hat{\beta}\right)
+\Phi \left( \frac{b-\vec{1}\hat{\alpha}-W\hat{\gamma}}{\hat{\sigma}}\frac{\hat{\beta}}{\hat{\sigma}} \right)
+\end{aligned}
+$$
