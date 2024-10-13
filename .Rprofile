@@ -10,4 +10,4 @@ library(pcalg) # Peter-Clark causal discovery algorithm
 library(modelsummary) # representation of models' results
 library(marginaleffects) # calculate marginal effects from models
 library(knitr) # dynamic report generation
-library(Rgraphviz) # plot graphs
+library(Rgraphviz) # plot causal graphs

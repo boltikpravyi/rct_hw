@@ -1,6 +1,7 @@
 ---
 title: 'Food for Thought: Evidence from a Randomized Controlled Trial'
 bibliography: references.bib
+link-citations: true
 author: ''
 date: today
 date-format: long
@@ -53,7 +54,7 @@ dfMatch <- (df %>%
 
 The experiment[^1] was conducted on a sample of $n = 2 500$ patients, who were randomly selected from a population of unknown size, $N$. Of these patients, $n_1 = 507$ were assigned to receive a food additive ($D = 1$), while the remaining $n_0 = 1993$ received a placebo, placing them in the control group ($D = 1$). The outcome variable is a post-treatment health measure ($Y$), and another key variable is the pre-treatment number of steps recorded for each patient ($X$).
 
-[^1]: The replication code is available on [GitHub](https://github.com/boltikpravyi/rct_hw) and [Google Colab](https://colab.research.google.com/drive/11MhfDH2x8BTuh3yGTZKWlJhVAeRTydMX?usp=sharing). Additional materials (figures and tables) can be found in the Appendix A of this note.
+[^1]: The replication code is available on [GitHub](https://github.com/boltikpravyi/rct_hw) and [Google Colab](https://colab.research.google.com/github/boltikpravyi/rct_hw/blob/main/RCT_Interactive_Notebook.ipynb). Additional materials (figures and tables) can be found in the Appendix A of this note.
 
 The results of the exploratory data analysis are summarized as follows:
 
@@ -86,6 +87,8 @@ The results of the exploratory data analysis are summarized as follows:
 [^3]: In our regressions, we include polynomials up to the fourth order.
 
 [^4]: A first-best solution would involve combining Double ML with censored regression estimation, and accounting for conditional heteroscedasticity of the noise during the estimation procedure. However, we rely on suboptimal approaches in this analysis and leave the optimal method for future work.
+
+\newpage
 
 # Estimation of the Population Average Treatment Effect and Its Precision {#sec-part2}
 
@@ -241,6 +244,13 @@ Our analysis indicates that the point estimate of the population average treatme
 
 If the analyzed sample is representative of the entire population and we consider 6.333 to be an unbiased estimate, we can treat this value as the estimand of the $\mbox{PATE}$. In this case, the $\mbox{PATE}$ has no variance, and its standard error becomes zero.
 
+# References {.unnumbered}
+
+::: {#refs}
+:::
+
+\newpage
+
 # Appendix A {#sec-appendix-a .unnumbered}
 
 ```{r}
@@ -256,14 +266,14 @@ df %>%
     geom_histogram(bins = 250) +
     theme_bw() +
     theme(legend.position = 'top') + 
-    labs(x = 'Post-Treatment Health Outcome (Y)', y = 'No. of evidence') +
+    labs(x = 'Post-Treatment Health Outcome (Y)', y = 'No. of Evidence') +
     scale_fill_discrete(name = '', labels = c('Control (D=0)', 'Treatment (D=1)'))
 dfMatch %>% 
   ggplot(mapping = aes(x = Y, fill = Label)) +
   geom_histogram(bins = 250) +
   theme_bw() +
   theme(legend.position = 'top') + 
-  labs(x = 'Post-Treatment Health Outcome (Y)', y = 'No. of evidence') +
+  labs(x = 'Post-Treatment Health Outcome (Y)', y = 'No. of Evidence') +
   scale_fill_discrete(name = '', labels = c('Control (D=0)', 'Treatment (D=1)'))
 ```
 
@@ -376,6 +386,8 @@ suff_stat <- list(C = cor(df[,2:4]), n = nrow(df[,2:4]))
 estPC <- pc(suff_stat, indepTest = gaussCItest, labels = colnames(df[,2:4]), alpha = 0.01, skel.method = 'stable.fast')
 plot(estPC, main = '')
 ```
+
+\newpage
 
 # Appendix B {#sec-appendix-b .unnumbered}
 

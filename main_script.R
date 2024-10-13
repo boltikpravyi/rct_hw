@@ -56,7 +56,7 @@ desc <- df %>%
             distinct_x = n_distinct(X),
             mean_x = mean(X), sd_x = sd(X),
             min_x = min(X), max_x = max(X),
-            median_x = median(Xc))
+            median_x = median(X))
 desc %>% 
   select(D, n, mean_y, sd_y, min_y, max_y, median_y)
 desc %>% 
@@ -99,6 +99,11 @@ lm(D ~ X, data = df) %>%
   coeftest(vcov = vcovHC(., type = 'HC3')) # hc-consistent s.e. for robust statistical inference
 lm(D ~ X, data = dfMatch) %>%
   coeftest(vcov = vcovHC(., type = 'HC3'))
+models <- list('Panel A: No Matching' = list('OLS' = lm(D ~ X, data = df)),
+               'Panel B: Exact Matching' = list('OLS' = lm(D ~ X, data = dfMatch)))
+modelsummary(models, shape = 'cbind', vcov = 'HC3', coef_rename = c('X' = 'No. of steps (X)'),
+             statistic = c('conf.int', 's.e. = {std.error}', 't = {statistic}', 'p = {p.value}'),
+             conf_level = .99, gof_omit = c('IC|RMSE|Log|R2$'))
 
 # How observed outcome is related to pre-treatment patients' characteristics
 df %>% 
@@ -117,7 +122,7 @@ dfMatch %>%
   theme(legend.position = 'top', plot.title = element_text(hjust = 0.5)) + 
   labs(x = 'Pre-treatment thousands of steps per day (X)', y = 'Observed health outcome (Y)', title = 'Exact matching') +
   scale_color_discrete(name = '', labels = c('Control (D=0)', 'Treatment (D=1)'))
-  
+
 # Make causal discovery procedure to understand connections between variables
 suff_stat <- list(C = cor(df[,2:4]), n = nrow(df[,2:4]))
 estPC <- pc(suff_stat, indepTest = gaussCItest, labels = colnames(df[,2:4]), alpha = 0.01, skel.method = 'stable.fast')
